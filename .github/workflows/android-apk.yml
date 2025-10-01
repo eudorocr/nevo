@@ -45,6 +45,7 @@ jobs:
         run: |
           flutter pub add shared_preferences
           flutter pub add flutter_localizations --sdk=flutter
+          flutter pub add device_calendar
           flutter pub add --dev flutter_launcher_icons
 
       - name: Get dependencies
@@ -54,6 +55,17 @@ jobs:
       - name: Generate launcher icons
         working-directory: app
         run: flutter pub run flutter_launcher_icons -f flutter_launcher_icons.yaml
+
+      - name: Inject Calendar permissions (Android)
+        working-directory: app
+        run: |
+          FILE="android/app/src/main/AndroidManifest.xml"
+          if [ -f "$FILE" ]; then
+            sed -i '0,/<manifest/s//&\n    <uses-permission android:name="android.permission.READ_CALENDAR" />\n    <uses-permission android:name="android.permission.WRITE_CALENDAR" />/' "$FILE"
+            echo "Calendar permissions inserted."
+          else
+            echo "AndroidManifest.xml not found; skipping permissions."
+          fi
 
       - name: Ensure Android minSdk 21
         working-directory: app
