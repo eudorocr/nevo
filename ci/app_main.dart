@@ -110,12 +110,12 @@ class _EventListPageState extends State<EventListPage> {
   }
 
   void _addEvent() async {
-    final created = await showDialog<Event>(
+    final result = await showDialog<EventActionResult>(
       context: context,
       builder: (ctx) => EventEditorDialog(event: Event.newEvent()),
     );
-    if (created != null) {
-      _events.add(created);
+    if (result?.event != null) {
+      _events.add(result!.event!);
       _events.sort((a, b) => a.fecha.compareTo(b.fecha));
       await _persist();
     }
