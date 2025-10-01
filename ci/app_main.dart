@@ -10,34 +10,6 @@ void main() {
 
 class EventosApp extends StatelessWidget {
   const EventosApp({super.key});
-
-
-  Future<void> _importFromCalendar() async {
-    setState(() => _loading = true);
-    try {
-      final imported = await _importer.importEvents();
-      int added = 0;
-      for (final ev in imported) {
-        final exists = _events.any((x) => x.titulo == ev.titulo && x.fecha.year == ev.fecha.year && x.fecha.month == ev.fecha.month && x.fecha.day == ev.fecha.day);
-        if (!exists) {
-          _events.add(ev);
-          added++;
-        }
-      }
-      _events.sort((a, b) => a.fecha.compareTo(b.fecha));
-      await _persist();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Importados $added evento(s)')));
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudo importar: $e')));
-      }
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -166,6 +138,7 @@ class EventListPage extends StatefulWidget {
 
 class _EventListPageState extends State<EventListPage> {
   final _importer = CalendarImporter();
+  final _importer = CalendarImporter();
   final _store = EventStore();
   List<Event> _events = [];
   bool _loading = true;
@@ -230,7 +203,43 @@ class _EventListPageState extends State<EventListPage> {
     ));
   }
 
-  @override
+  
+  Future<void> _importFromCalendar() async {
+    setState(() => _loading = true);
+    try {
+      final imported = await _importer.importEvents();
+      int added = 0;
+      for (final ev in imported) {
+        final exists = _events.any((x) =>
+          x.titulo == ev.titulo &&
+          x.fecha.year == ev.fecha.year &&
+          x.fecha.month == ev.fecha.month &&
+          x.fecha.day == ev.fecha.day
+        );
+        if (!exists) {
+          _events.add(ev);
+          added++;
+        }
+      }
+      _events.sort((a, b) => a.fecha.compareTo(b.fecha));
+      await _persist();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Importados $added evento(s)'))
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo importar: $e'))
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+@override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
@@ -347,7 +356,7 @@ class _EventEditorDialogState extends State<EventEditorDialog> {
   }
 
   Future<void> _pickDate() async {
-    final picked = await showDatePicker(context: context, useRootNavigator: true,
+    final picked = await showDatePicker(context: context, useRootNavigator: true, useRootNavigator: true,
       initialDate: _fecha,
       firstDate: DateTime(1970),
       lastDate: DateTime(2100),
@@ -369,7 +378,7 @@ class _EventEditorDialogState extends State<EventEditorDialog> {
       descripcion: _desc.text.trim().isEmpty ? null : _desc.text.trim(),
       fecha: DateTime(_fecha.year, _fecha.month, _fecha.day),
     );
-    Navigator.of(context).pop(EventActionResult.saved(updated));
+    Navigator.of(context, rootNavigator: true).pop(EventActionResult.saved(updated));
   }
 
   void _delete() {
@@ -383,7 +392,7 @@ class _EventEditorDialogState extends State<EventEditorDialog> {
           FilledButton(
             onPressed: () {
               Navigator.pop(ctx);
-              Navigator.of(context).pop(EventActionResult.deleted());
+              Navigator.of(context, rootNavigator: true).pop(EventActionResult.deleted());
             },
             child: const Text('Eliminar'),
           ),
@@ -479,7 +488,7 @@ class _SearchNearbyPageState extends State<SearchNearbyPage> {
   }
 
   Future<void> _pickTarget() async {
-    final picked = await showDatePicker(context: context, useRootNavigator: true,
+    final picked = await showDatePicker(context: context, useRootNavigator: true, useRootNavigator: true,
       initialDate: _target,
       firstDate: DateTime(1970),
       lastDate: DateTime(2100),
