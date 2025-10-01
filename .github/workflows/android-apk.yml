@@ -38,10 +38,11 @@ jobs:
           cp ci/app_main.dart app/lib/main.dart
 
 
-- name: Add required Flutter packages
-  working-directory: app
-  run: |
-    flutter pub add shared_preferences
+      - name: Add required Flutter packages
+        working-directory: app
+        run: |
+          flutter pub add shared_preferences
+
       - name: Get dependencies
         working-directory: app
         run: flutter pub get
