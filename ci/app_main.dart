@@ -84,9 +84,9 @@ class CalendarImporter {
 
   Future<bool> _ensurePermissions() async {
     final res = await _plugin.hasPermissions();
-    if (res?.isGranted == true) return true;
+    if (res?.data == true) return true;
     final req = await _plugin.requestPermissions();
-    return req?.isGranted == true;
+    return req?.data == true;
   }
 
   Future<List<Event>> importEvents({
@@ -106,8 +106,8 @@ class CalendarImporter {
     if (cals.isEmpty) return [];
 
     // Prefer writable calendars; fallback to first
-    dc.Calendar? cal = cals.firstWhere((c) => (c.isReadOnly ?? false) == false, orElse: () => cals.first);
-    if (cal.id == null) return [];
+    final dc.Calendar cal = cals.firstWhere((c) => (c.isReadOnly ?? false) == false, orElse: () => cals.first);
+    if (cal.id == null || cal.id!.isEmpty) return [];
 
     final evRes = await _plugin.retrieveEvents(
       cal.id!,
@@ -138,8 +138,7 @@ class EventListPage extends StatefulWidget {
 
 class _EventListPageState extends State<EventListPage> {
   final _importer = CalendarImporter();
-  final _importer = CalendarImporter();
-  final _store = EventStore();
+final _store = EventStore();
   List<Event> _events = [];
   bool _loading = true;
 
@@ -356,7 +355,7 @@ class _EventEditorDialogState extends State<EventEditorDialog> {
   }
 
   Future<void> _pickDate() async {
-    final picked = await showDatePicker(context: context, useRootNavigator: true, useRootNavigator: true,
+    final picked = await showDatePicker(context: context, useRootNavigator: true,
       initialDate: _fecha,
       firstDate: DateTime(1970),
       lastDate: DateTime(2100),
@@ -488,7 +487,7 @@ class _SearchNearbyPageState extends State<SearchNearbyPage> {
   }
 
   Future<void> _pickTarget() async {
-    final picked = await showDatePicker(context: context, useRootNavigator: true, useRootNavigator: true,
+    final picked = await showDatePicker(context: context, useRootNavigator: true,
       initialDate: _target,
       firstDate: DateTime(1970),
       lastDate: DateTime(2100),
