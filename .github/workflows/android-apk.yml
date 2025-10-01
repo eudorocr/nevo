@@ -60,12 +60,15 @@ jobs:
         run: |
           FILE="android/app/src/main/AndroidManifest.xml"
           if [ -f "$FILE" ]; then
+            # 1) Remove any previously injected invalid lines (android="...") if they exist
+            awk '!/<uses-permission[[:space:]]+android="/{print}' "$FILE" > tmp && mv tmp "$FILE"
+            # 2) Insert the correct permissions once after <manifest>
             if ! grep -q 'android.permission.READ_CALENDAR' "$FILE"; then
               awk '{
                 print $0
                 if ($0 ~ /<manifest[^>]*>/ && !inserted) {
-                  print "    <uses-permission android=\"android.permission.READ_CALENDAR\" />"
-                  print "    <uses-permission android=\"android.permission.WRITE_CALENDAR\" />"
+                  print "    <uses-permission android=\"android:name\" android:name=\"android.permission.READ_CALENDAR\" />"
+                  print "    <uses-permission android=\"android:name\" android:name=\"android.permission.WRITE_CALENDAR\" />"
                   inserted=1
                 }
               }' "$FILE" > tmp && mv tmp "$FILE"
@@ -116,3 +119,4 @@ jobs:
             app/build/app/outputs/flutter-apk/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
