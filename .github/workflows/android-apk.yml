@@ -61,8 +61,11 @@ jobs:
         run: |
           FILE="android/app/src/main/AndroidManifest.xml"
           if [ -f "$FILE" ]; then
-            sed -i '0,/<manifest/s//&\n    <uses-permission android:name="android.permission.READ_CALENDAR" />\n    <uses-permission android:name="android.permission.WRITE_CALENDAR" />/' "$FILE"
-            echo "Calendar permissions inserted."
+            # Insert permissions once at top after <manifest>
+            if ! grep -q READ_CALENDAR "$FILE"; then
+              sed -i '0,/<manifest/s//&\n    <uses-permission android:name="android.permission.READ_CALENDAR" />\n    <uses-permission android:name="android.permission.WRITE_CALENDAR" />/' "$FILE"
+            fi
+            echo "Calendar permissions ensured."
           else
             echo "AndroidManifest.xml not found; skipping permissions."
           fi
@@ -106,4 +109,5 @@ jobs:
             app/build/app/outputs/flutter-apk/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 
