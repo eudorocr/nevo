@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Descargar APK</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji"; margin: 40px; }
+    .card { max-width: 700px; margin: auto; border: 1px solid #e5e7eb; border-radius: 16px; padding: 24px; box-shadow: 0 1px 10px rgba(0,0,0,.05); }
+    h1 { margin-top: 0; }
+    button { padding: 12px 18px; border-radius: 12px; border: 1px solid #d1d5db; background: white; cursor: pointer; }
+    button:hover { background: #f9fafb; }
+    .muted { color: #6b7280; font-size: 14px; }
+    .error { color: #b91c1c; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Descargar APK</h1>
+    <p class="muted">Este botón obtiene el APK del Release <code>latest</code> del repositorio.</p>
+    <label>Owner: <input id="owner" placeholder="tu-usuario" /></label>
+    <label>Repo: <input id="repo" placeholder="tu-repositorio" /></label>
+    <div style="margin:16px 0;">
+      <button id="fetch">Buscar APK</button>
+      <a id="dl" href="#" style="display:none;margin-left:12px;"><button>Descargar APK</button></a>
+    </div>
+    <pre id="log" class="muted"></pre>
+  </div>
+<script>
+  async function fetchLatest() {
+    const owner = document.getElementById('owner').value.trim();
+    const repo = document.getElementById('repo').value.trim();
+    const log = document.getElementById('log');
+    const dl = document.getElementById('dl');
+    dl.style.display = 'none'; dl.removeAttribute('href'); log.textContent='Cargando...';
+    try {
+      const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/releases/tags/latest`);
+      if (!res.ok) throw new Error('No se pudo leer el Release latest. ¿Ya corrió el workflow?');
+      const data = await res.json();
+      const apk = (data.assets || []).find(a => a.name.endsWith('.apk'));
+      if (!apk) throw new Error('No se encontró un .apk en el Release.');
+      dl.href = apk.browser_download_url;
+      dl.style.display = 'inline-block';
+      log.textContent = `Versión: ${data.name} — asset: ${apk.name} (${(apk.size/1024/1024).toFixed(2)} MB)`;
+    } catch (e) {
+      log.textContent = 'Error: ' + e.message;
+    }
+  }
+  document.getElementById('fetch').addEventListener('click', fetchLatest);
+</script>
+</body>
+</html>
