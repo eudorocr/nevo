@@ -55,17 +55,24 @@ jobs:
       - name: Generate launcher icons
         working-directory: app
         run: flutter pub run flutter_launcher_icons -f flutter_launcher_icons.yaml
-
       - name: Inject Calendar permissions (Android)
         working-directory: app
         run: |
           FILE="android/app/src/main/AndroidManifest.xml"
           if [ -f "$FILE" ]; then
-            # Insert permissions once at top after <manifest>
-            if ! grep -q READ_CALENDAR "$FILE"; then
-              sed -i '0,/<manifest/s//&\n    <uses-permission android:name="android.permission.READ_CALENDAR" />\n    <uses-permission android:name="android.permission.WRITE_CALENDAR" />/' "$FILE"
+            if ! grep -q 'android.permission.READ_CALENDAR' "$FILE"; then
+              awk '{
+                print $0
+                if ($0 ~ /<manifest[^>]*>/ && !inserted) {
+                  print "    <uses-permission android=\"android.permission.READ_CALENDAR\" />"
+                  print "    <uses-permission android=\"android.permission.WRITE_CALENDAR\" />"
+                  inserted=1
+                }
+              }' "$FILE" > tmp && mv tmp "$FILE"
+              echo "Inserted calendar permissions."
+            else
+              echo "Calendar permissions already present."
             fi
-            echo "Calendar permissions ensured."
           else
             echo "AndroidManifest.xml not found; skipping permissions."
           fi
@@ -109,5 +116,6 @@ jobs:
             app/build/app/outputs/flutter-apk/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 
 
