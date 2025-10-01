@@ -37,6 +37,30 @@ jobs:
           mkdir -p app/lib
           cp ci/app_main.dart app/lib/main.dart
 
+      - name: Diagnostics (doctor + dart versions)
+        run: |
+          flutter doctor -v
+          dart --version
+
+      - name: Ensure Android minSdk 21
+        working-directory: app
+        run: |
+          FILE="android/app/build.gradle"
+          if [ -f "$FILE" ]; then
+            sed -i 's/minSdkVersion [0-9]\+/minSdkVersion 21/' "$FILE" || true
+            echo "minSdk set to 21 (best-effort)."
+          else
+            echo "build.gradle not found; skipping minSdk tweak."
+          fi
+
+      - name: Analyze (Flutter/Dart)
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter analyze || true
+          dart analyze || true
+
+
       - name: Prepare icon & config
         run: |
           mkdir -p app/assets
@@ -71,7 +95,14 @@ jobs:
 
       - name: Build APK (release)
         working-directory: app
-        run: flutter build apk --release
+        run: |
+          set -o pipefail
+          flutter build apk --release -v 2>&1 | tee build_log.txt
+      - name: Print build log (if exists)
+        if: always()
+        working-directory: app
+        run: |
+          test -f build_log.txt && tail -n 400 build_log.txt || true
 
       - name: Upload artifact (APK)
         uses: actions/upload-artifact@v4
