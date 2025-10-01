@@ -266,10 +266,11 @@ class _EventEditorDialogState extends State<EventEditorDialog> {
   }
 
   Future<void> _pickDate() async {
-    final picked = await showDatePicker(context: context, useRootNavigator: true,
+    final picked = await showDatePicker(context: context, useRootNavigator: true, useRootNavigator: true,
       initialDate: _fecha,
       firstDate: DateTime(1970),
       lastDate: DateTime(2100),
+      locale: const Locale('es'),
     );
     if (picked != null) setState(() => _fecha = picked);
   }
@@ -287,7 +288,7 @@ class _EventEditorDialogState extends State<EventEditorDialog> {
       descripcion: _desc.text.trim().isEmpty ? null : _desc.text.trim(),
       fecha: DateTime(_fecha.year, _fecha.month, _fecha.day),
     );
-    Navigator.of(context).pop(EventActionResult.saved(updated));
+    Navigator.of(context, rootNavigator: true).pop(EventActionResult.saved(updated));
   }
 
   void _delete() {
@@ -301,7 +302,7 @@ class _EventEditorDialogState extends State<EventEditorDialog> {
           FilledButton(
             onPressed: () {
               Navigator.pop(ctx);
-              Navigator.of(context).pop(EventActionResult.deleted());
+              Navigator.of(context, rootNavigator: true).pop(EventActionResult.deleted());
             },
             child: const Text('Eliminar'),
           ),
@@ -397,10 +398,11 @@ class _SearchNearbyPageState extends State<SearchNearbyPage> {
   }
 
   Future<void> _pickTarget() async {
-    final picked = await showDatePicker(context: context, useRootNavigator: true,
+    final picked = await showDatePicker(context: context, useRootNavigator: true, useRootNavigator: true,
       initialDate: _target,
       firstDate: DateTime(1970),
       lastDate: DateTime(2100),
+      locale: const Locale('es'),
     );
     if (picked != null) setState(() => _target = picked);
   }
