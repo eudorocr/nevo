@@ -1,7 +1,7 @@
-
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,6 +14,13 @@ class EventosApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      locale: const Locale('es'),
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [Locale('es'), Locale('en')],
       title: 'Eventos',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -330,7 +337,7 @@ class _EventEditorDialogState extends State<EventEditorDialog> {
   }
 
   Future<void> _pickDate() async {
-    final picked = await showDatePicker(context: context, useRootNavigator: true,
+    final picked = await showDatePicker(context: context, useRootNavigator: true, useRootNavigator: true,
       initialDate: _fecha,
       firstDate: DateTime(1970),
       lastDate: DateTime(2100),
@@ -480,7 +487,7 @@ class _SearchNearbyPageState extends State<SearchNearbyPage> {
   }
 
   Future<void> _pickTarget() async {
-    final picked = await showDatePicker(context: context, useRootNavigator: true,
+    final picked = await showDatePicker(context: context, useRootNavigator: true, useRootNavigator: true,
       initialDate: _target,
       firstDate: DateTime(1970),
       lastDate: DateTime(2100),
