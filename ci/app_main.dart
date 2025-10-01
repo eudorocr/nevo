@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:device_calendar/device_calendar.dart' as dc;
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -9,6 +10,33 @@ void main() {
 
 class EventosApp extends StatelessWidget {
   const EventosApp({super.key});
+
+
+  Future<void> _importFromCalendar() async {
+    setState(() => _loading = true);
+    try {
+      final imported = await _importer.importEvents();
+      int added = 0;
+      for (final ev in imported) {
+        final exists = _events.any((x) => x.titulo == ev.titulo && x.fecha.year == ev.fecha.year && x.fecha.month == ev.fecha.month && x.fecha.day == ev.fecha.day);
+        if (!exists) {
+          _events.add(ev);
+          added++;
+        }
+      }
+      _events.sort((a, b) => a.fecha.compareTo(b.fecha));
+      await _persist();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Importados $added evento(s)')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudo importar: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -78,6 +106,57 @@ class EventStore {
   }
 }
 
+
+class CalendarImporter {
+  final dc.DeviceCalendarPlugin _plugin = dc.DeviceCalendarPlugin();
+
+  Future<bool> _ensurePermissions() async {
+    final res = await _plugin.hasPermissions();
+    if (res?.isGranted == true) return true;
+    final req = await _plugin.requestPermissions();
+    return req?.isGranted == true;
+  }
+
+  Future<List<Event>> importEvents({
+    DateTime? start,
+    DateTime? end,
+    int maxEvents = 500,
+  }) async {
+    final ok = await _ensurePermissions();
+    if (!ok) {
+      throw 'Permiso de calendario denegado';
+    }
+    start ??= DateTime.now().subtract(const Duration(days: 365));
+    end ??= DateTime.now().add(const Duration(days: 365));
+
+    final calsRes = await _plugin.retrieveCalendars();
+    final cals = calsRes?.data ?? const [];
+    if (cals.isEmpty) return [];
+
+    // Prefer writable calendars; fallback to first
+    dc.Calendar? cal = cals.firstWhere((c) => (c.isReadOnly ?? false) == false, orElse: () => cals.first);
+    if (cal.id == null) return [];
+
+    final evRes = await _plugin.retrieveEvents(
+      cal.id!,
+      dc.RetrieveEventsParams(startDate: start, endDate: end),
+    );
+    final evs = evRes?.data ?? const [];
+
+    // Map to our Event model (date-only)
+    final out = <Event>[];
+    for (final e in evs) {
+      final dt = (e.start?.toLocal()) ?? DateTime.now();
+      final d = DateTime(dt.year, dt.month, dt.day);
+      final title = (e.title == null || e.title!.trim().isEmpty) ? '(sin título)' : e.title!.trim();
+      final descr = e.description?.trim().isEmpty == true ? null : e.description;
+      final id = 'ext:${cal.id}:${e.eventId ?? e.originalStart?.millisecondsSinceEpoch}:${d.toIso8601String()}';
+      out.add(Event(id: id, titulo: title, descripcion: descr, fecha: d));
+      if (out.length >= maxEvents) break;
+    }
+    return out;
+  }
+}
 class EventListPage extends StatefulWidget {
   const EventListPage({super.key});
 
@@ -86,6 +165,7 @@ class EventListPage extends StatefulWidget {
 }
 
 class _EventListPageState extends State<EventListPage> {
+  final _importer = CalendarImporter();
   final _store = EventStore();
   List<Event> _events = [];
   bool _loading = true;
@@ -156,6 +236,7 @@ class _EventListPageState extends State<EventListPage> {
       appBar: AppBar(
         title: const Text('Eventos por fecha'),
         actions: [
+          IconButton(onPressed: _importFromCalendar, icon: const Icon(Icons.download)),
           IconButton(onPressed: _openSearch, icon: const Icon(Icons.search)),
         ],
       ),
@@ -266,7 +347,7 @@ class _EventEditorDialogState extends State<EventEditorDialog> {
   }
 
   Future<void> _pickDate() async {
-    final picked = await showDatePicker(context: context, useRootNavigator: true, useRootNavigator: true,
+    final picked = await showDatePicker(context: context, useRootNavigator: true,
       initialDate: _fecha,
       firstDate: DateTime(1970),
       lastDate: DateTime(2100),
@@ -288,7 +369,7 @@ class _EventEditorDialogState extends State<EventEditorDialog> {
       descripcion: _desc.text.trim().isEmpty ? null : _desc.text.trim(),
       fecha: DateTime(_fecha.year, _fecha.month, _fecha.day),
     );
-    Navigator.of(context, rootNavigator: true).pop(EventActionResult.saved(updated));
+    Navigator.of(context).pop(EventActionResult.saved(updated));
   }
 
   void _delete() {
@@ -302,7 +383,7 @@ class _EventEditorDialogState extends State<EventEditorDialog> {
           FilledButton(
             onPressed: () {
               Navigator.pop(ctx);
-              Navigator.of(context, rootNavigator: true).pop(EventActionResult.deleted());
+              Navigator.of(context).pop(EventActionResult.deleted());
             },
             child: const Text('Eliminar'),
           ),
@@ -398,7 +479,7 @@ class _SearchNearbyPageState extends State<SearchNearbyPage> {
   }
 
   Future<void> _pickTarget() async {
-    final picked = await showDatePicker(context: context, useRootNavigator: true, useRootNavigator: true,
+    final picked = await showDatePicker(context: context, useRootNavigator: true,
       initialDate: _target,
       firstDate: DateTime(1970),
       lastDate: DateTime(2100),
