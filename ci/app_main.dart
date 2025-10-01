@@ -1,3 +1,4 @@
+
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -90,6 +91,36 @@ class _EventListPageState extends State<EventListPage> {
   List<Event> _events = [];
   bool _loading = true;
 
+  String _formatInputDate(DateTime d) {
+    final dd = d.day.toString().padLeft(2, '0');
+    final mm = d.month.toString().padLeft(2, '0');
+    final yyyy = d.year.toString();
+    return '$dd/$mm/$yyyy';
+  }
+  DateTime? _tryParseInputDate(String s) {
+    final t = s.trim();
+    final dmY = RegExp(r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$');
+    final yMd = RegExp(r'^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$');
+    Match? m = dmY.firstMatch(t);
+    if (m != null) {
+      final d = int.tryParse(m.group(1)!);
+      final mo = int.tryParse(m.group(2)!);
+      final y = int.tryParse(m.group(3)!);
+      if (d != null && mo != null && y != null) {
+        try { return DateTime(y, mo, d); } catch (_) {}
+      }
+    }
+    m = yMd.firstMatch(t);
+    if (m != null) {
+      final y = int.tryParse(m.group(1)!);
+      final mo = int.tryParse(m.group(2)!);
+      final d = int.tryParse(m.group(3)!);
+      if (d != null && mo != null && y != null) {
+        try { return DateTime(y, mo, d); } catch (_) {}
+      }
+    }
+    return null;
+  }
   @override
   void initState() {
     super.initState();
@@ -110,12 +141,12 @@ class _EventListPageState extends State<EventListPage> {
   }
 
   void _addEvent() async {
-    final result = await showDialog<EventActionResult>(
+    final created = await showDialog<Event>(
       context: context,
       builder: (ctx) => EventEditorDialog(event: Event.newEvent()),
     );
-    if (result?.event != null) {
-      _events.add(result!.event!);
+    if (created != null) {
+      _events.add(created);
       _events.sort((a, b) => a.fecha.compareTo(b.fecha));
       await _persist();
     }
@@ -249,31 +280,63 @@ class _EventEditorDialogState extends State<EventEditorDialog> {
   late TextEditingController _title;
   late TextEditingController _desc;
   late DateTime _fecha;
+  late TextEditingController _dateCtrl;
 
+  String _formatInputDate(DateTime d) {
+    final dd = d.day.toString().padLeft(2, '0');
+    final mm = d.month.toString().padLeft(2, '0');
+    final yyyy = d.year.toString();
+    return '$dd/$mm/$yyyy';
+  }
+  DateTime? _tryParseInputDate(String s) {
+    final t = s.trim();
+    final dmY = RegExp(r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$');
+    final yMd = RegExp(r'^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$');
+    Match? m = dmY.firstMatch(t);
+    if (m != null) {
+      final d = int.tryParse(m.group(1)!);
+      final mo = int.tryParse(m.group(2)!);
+      final y = int.tryParse(m.group(3)!);
+      if (d != null && mo != null && y != null) {
+        try { return DateTime(y, mo, d); } catch (_) {}
+      }
+    }
+    m = yMd.firstMatch(t);
+    if (m != null) {
+      final y = int.tryParse(m.group(1)!);
+      final mo = int.tryParse(m.group(2)!);
+      final d = int.tryParse(m.group(3)!);
+      if (d != null && mo != null && y != null) {
+        try { return DateTime(y, mo, d); } catch (_) {}
+      }
+    }
+    return null;
+  }
   @override
   void initState() {
     super.initState();
     _title = TextEditingController(text: widget.event.titulo);
     _desc = TextEditingController(text: widget.event.descripcion ?? '');
     _fecha = widget.event.fecha;
+    _dateCtrl = TextEditingController(text: _formatInputDate(_fecha));
   }
 
   @override
   void dispose() {
     _title.dispose();
     _desc.dispose();
+    _dateCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _pickDate() async {
-    final picked = await showDatePicker(
-      context: context,
+    final picked = await showDatePicker(context: context, useRootNavigator: true,
       initialDate: _fecha,
       firstDate: DateTime(1970),
       lastDate: DateTime(2100),
       locale: const Locale('es'),
     );
-    if (picked != null) setState(() => _fecha = picked);
+    if (picked != null) setState(() { _fecha = picked; _dateCtrl.text = _formatInputDate(_fecha); });
   }
 
   void _save() {
@@ -283,11 +346,13 @@ class _EventEditorDialogState extends State<EventEditorDialog> {
       );
       return;
     }
+    final typed = _tryParseInputDate(_dateCtrl.text);
+    final eff = typed ?? _fecha;
     final updated = Event(
       id: widget.event.id,
       titulo: _title.text.trim(),
       descripcion: _desc.text.trim().isEmpty ? null : _desc.text.trim(),
-      fecha: DateTime(_fecha.year, _fecha.month, _fecha.day),
+      fecha: DateTime(eff.year, eff.month, eff.day),
     );
     Navigator.of(context).pop(EventActionResult.saved(updated));
   }
@@ -340,12 +405,28 @@ class _EventEditorDialogState extends State<EventEditorDialog> {
             Row(
               children: [
                 Expanded(
-                  child: Text('Fecha: ${_formatDate(_fecha)}'),
+                  child: TextField(
+                    controller: _dateCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Fecha (dd/mm/aaaa o yyyy-mm-dd)',
+                      prefixIcon: Icon(Icons.event),
+                    ),
+                    keyboardType: TextInputType.datetime,
+                    onSubmitted: (_) {
+                      final parsed = _tryParseInputDate(_dateCtrl.text);
+                      if (parsed != null) setState(() => _fecha = parsed);
+                    },
+                    onEditingComplete: () {
+                      final parsed = _tryParseInputDate(_dateCtrl.text);
+                      if (parsed != null) setState(() => _fecha = parsed);
+                    },
+                  ),
                 ),
-                TextButton.icon(
+                const SizedBox(width: 8),
+                IconButton(
                   onPressed: _pickDate,
-                  icon: const Icon(Icons.calendar_today),
-                  label: const Text('Cambiar'),
+                  icon: const Icon(Icons.calendar_month),
+                  tooltip: 'Elegir fecha',
                 ),
               ],
             ),
@@ -399,8 +480,7 @@ class _SearchNearbyPageState extends State<SearchNearbyPage> {
   }
 
   Future<void> _pickTarget() async {
-    final picked = await showDatePicker(
-      context: context,
+    final picked = await showDatePicker(context: context, useRootNavigator: true,
       initialDate: _target,
       firstDate: DateTime(1970),
       lastDate: DateTime(2100),
