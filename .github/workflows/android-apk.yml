@@ -29,7 +29,7 @@ jobs:
         run: flutter --version
 
       - name: Create Flutter app skeleton
-        run: flutter create app
+        run: flutter create --platforms=android app
 
       - name: Inject your main.dart
         run: |
@@ -58,9 +58,16 @@ jobs:
         working-directory: app
         run: flutter pub run flutter_launcher_icons -f flutter_launcher_icons.yaml
 
-      - name: Set Android app name
+      - name: Set Android app name (best-effort)
+        working-directory: app
         run: |
-          sed -i 's/app_name">[^<]*/app_name">Eventos/' app/android/app/src/main/res/values/strings.xml
+          FILE="android/app/src/main/res/values/strings.xml"
+          if [ -f "$FILE" ]; then
+            sed -i 's/app_name">[^<]*/app_name">Eventos/' "$FILE"
+            echo "Updated app name to 'Eventos'."
+          else
+            echo "strings.xml not found; skipping app name change."
+          fi
 
       - name: Build APK (release)
         working-directory: app
