@@ -89,29 +89,29 @@ class CalendarImporter {
     return req?.data == true;
   }
 
-  Future<List<Event>> importEvents({
+  Future<List<dc.Calendar>> listCalendars({bool writableOnly = true}) async {
+    final ok = await _ensurePermissions();
+    if (!ok) throw 'Permiso de calendario denegado';
+    final cals = (await _plugin.retrieveCalendars()).data?.toList() ?? <dc.Calendar>[];
+    if (!writableOnly) return cals;
+    return cals.where((c) => (c.isReadOnly ?? false) == false).toList();
+  }
+
+  Future<List<Event>> importEventsForCalendar({
+    required String calendarId,
     DateTime? start,
     DateTime? end,
     int maxEvents = 500,
   }) async {
     final ok = await _ensurePermissions();
     if (!ok) throw 'Permiso de calendario denegado';
+    if (calendarId.isEmpty) return [];
 
     start ??= DateTime.now().subtract(const Duration(days: 365));
     end   ??= DateTime.now().add(const Duration(days: 365));
 
-    final List<dc.Calendar> cals =
-        (await _plugin.retrieveCalendars()).data?.toList() ?? <dc.Calendar>[];
-    if (cals.isEmpty) return [];
-
-    final dc.Calendar cal = cals.firstWhere(
-      (c) => (c.isReadOnly ?? false) == false,
-      orElse: () => cals.first,
-    );
-    if (cal.id == null || cal.id!.isEmpty) return [];
-
     final evRes = await _plugin.retrieveEvents(
-      cal.id!,
+      calendarId,
       dc.RetrieveEventsParams(startDate: start, endDate: end),
     );
 
@@ -128,7 +128,7 @@ class CalendarImporter {
           ? null
           : e.description!.trim();
       final unique = e.eventId ?? dt.millisecondsSinceEpoch.toString();
-      final id = 'ext:${cal.id}:$unique:${d.toIso8601String()}';
+      final id = 'ext:$calendarId:$unique:${d.toIso8601String()}';
       out.add(Event(id: id, titulo: title, descripcion: descr, fecha: d));
       if (out.length >= maxEvents) break;
     }
@@ -175,10 +175,26 @@ class _EventListPageState extends State<EventListPage> {
 
   Future<void> _persist() => _store.save(_events);
 
-  Future<void> _importFromCalendar() async {
+  Future<void> _openImportSheet() async {
     setState(() => _loading = true);
     try {
-      final imported = await _importer.importEvents();
+      final calendars = await _importer.listCalendars(writableOnly: false);
+      if (!mounted) return;
+      final params = await showModalBottomSheet<ImportParams>(
+        context: context,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        builder: (ctx) => ImportSheet(calendars: calendars),
+      );
+      if (params == null) return;
+
+      final imported = await _importer.importEventsForCalendar(
+        calendarId: params.calendarId,
+        start: params.start,
+        end: params.end,
+      );
       int added = 0;
       for (final ev in imported) {
         final exists = _events.any((x) =>
@@ -195,11 +211,13 @@ class _EventListPageState extends State<EventListPage> {
       await _persist();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Importados $added evento(s)')));
+        SnackBar(content: Text('Importados $added evento(s) de "${params.calendarName}"'))
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo importar: $e')));
+        SnackBar(content: Text('No se pudo importar: $e'))
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -298,7 +316,7 @@ class _EventListPageState extends State<EventListPage> {
       appBar: AppBar(
         title: const Text('Eventos por fecha'),
         actions: [
-          IconButton(onPressed: _importFromCalendar, icon: const Icon(Icons.download)),
+          IconButton(onPressed: _openImportSheet, icon: const Icon(Icons.download)),
           IconButton(onPressed: _openSearch, icon: const Icon(Icons.search)),
         ],
       ),
@@ -559,6 +577,197 @@ class SearchResultsPage extends StatelessWidget {
               );
             },
           ),
+    );
+  }
+}
+
+// ======= Importación con selección =======
+
+class ImportParams {
+  final String calendarId;
+  final String calendarName;
+  final DateTime start;
+  final DateTime end;
+  const ImportParams({required this.calendarId, required this.calendarName, required this.start, required this.end});
+}
+
+class ImportSheet extends StatefulWidget {
+  final List<dc.Calendar> calendars;
+  const ImportSheet({super.key, required this.calendars});
+
+  @override
+  State<ImportSheet> createState() => _ImportSheetState();
+}
+
+class _ImportSheetState extends State<ImportSheet> {
+  late dc.Calendar _selected;
+  late DateTime _start;
+  late DateTime _end;
+  late TextEditingController _startCtrl;
+  late TextEditingController _endCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = widget.calendars.first;
+    final now = DateTime.now();
+    _start = DateTime(now.year, now.month, now.day).subtract(const Duration(days: 30));
+    _end   = DateTime(now.year, now.month, now.day).add(const Duration(days: 90));
+    _startCtrl = TextEditingController(text: _fmt(_start));
+    _endCtrl   = TextEditingController(text: _fmt(_end));
+  }
+
+  @override
+  void dispose() {
+    _startCtrl.dispose();
+    _endCtrl.dispose();
+    super.dispose();
+  }
+
+  String _fmt(DateTime d) {
+    final dd = d.day.toString().padLeft(2, '0');
+    final mm = d.month.toString().padLeft(2, '0');
+    final yyyy = d.year.toString();
+    return '$dd/$mm/$yyyy';
+  }
+
+  DateTime? _parse(String s) {
+    final t = s.trim();
+    final dmY = RegExp(r'^(\\d{1,2})[/-](\\d{1,2})[/-](\\d{4})$');
+    final yMd = RegExp(r'^(\\d{4})[/-](\\d{1,2})[/-](\\d{1,2})$');
+    final a = dmY.firstMatch(t);
+    if (a != null) {
+      final d = int.tryParse(a.group(1)!);
+      final m = int.tryParse(a.group(2)!);
+      final y = int.tryParse(a.group(3)!);
+      if (d != null && m != null && y != null) {
+        try { return DateTime(y, m, d); } catch (_) {}
+      }
+    }
+    final b = yMd.firstMatch(t);
+    if (b != null) {
+      final y = int.tryParse(b.group(1)!);
+      final m = int.tryParse(b.group(2)!);
+      final d = int.tryParse(b.group(3)!);
+      if (d != null && m != null && y != null) {
+        try { return DateTime(y, m, d); } catch (_) {}
+      }
+    }
+    return null;
+  }
+
+  Future<void> _pickStart() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _start,
+      firstDate: DateTime(1900),
+      lastDate:  DateTime(2100),
+      helpText: 'Inicio',
+      useRootNavigator: true,
+    );
+    if (picked != null) setState(() {
+      _start = DateTime(picked.year, picked.month, picked.day);
+      _startCtrl.text = _fmt(_start);
+      if (_end.isBefore(_start)) {
+        _end = _start;
+        _endCtrl.text = _fmt(_end);
+      }
+    });
+  }
+
+  Future<void> _pickEnd() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _end,
+      firstDate: DateTime(1900),
+      lastDate:  DateTime(2100),
+      helpText: 'Fin',
+      useRootNavigator: true,
+    );
+    if (picked != null) setState(() {
+      _end = DateTime(picked.year, picked.month, picked.day);
+      if (_end.isBefore(_start)) _end = _start;
+      _endCtrl.text = _fmt(_end);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final inset = MediaQuery.of(context).viewInsets.bottom;
+    return Padding(
+      padding: EdgeInsets.only(bottom: inset),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(child: Container(width: 32, height: 4, decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(3)))),
+              const SizedBox(height: 12),
+              Text('Importar del calendario', style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<dc.Calendar>(
+                value: _selected,
+                items: widget.calendars.map((c) => DropdownMenuItem<dc.Calendar>(
+                  value: c,
+                  child: Text((c.name ?? 'Sin nombre') + ((c.isReadOnly ?? false) ? ' (sólo lectura)' : '')),
+                )).toList(),
+                onChanged: (v) => setState(() { if (v != null) _selected = v; }),
+                decoration: const InputDecoration(
+                  labelText: 'Calendario',
+                  prefixIcon: Icon(Icons.calendar_today),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(children: [
+                Expanded(child: TextField(
+                  controller: _startCtrl,
+                  decoration: const InputDecoration(labelText: 'Inicio', prefixIcon: Icon(Icons.event)),
+                  keyboardType: TextInputType.datetime,
+                  onSubmitted: (_){ final p=_parse(_startCtrl.text); if(p!=null) setState(()=>_start=p); },
+                  onEditingComplete: (){ final p=_parse(_startCtrl.text); if(p!=null) setState(()=>_start=p); },
+                )),
+                const SizedBox(width: 8),
+                IconButton(onPressed: _pickStart, icon: const Icon(Icons.calendar_month)),
+              ]),
+              const SizedBox(height: 8),
+              Row(children: [
+                Expanded(child: TextField(
+                  controller: _endCtrl,
+                  decoration: const InputDecoration(labelText: 'Fin', prefixIcon: Icon(Icons.event)),
+                  keyboardType: TextInputType.datetime,
+                  onSubmitted: (_){ final p=_parse(_endCtrl.text); if(p!=null) setState(()=>_end=p); },
+                  onEditingComplete: (){ final p=_parse(_endCtrl.text); if(p!=null) setState(()=>_end=p); },
+                )),
+                const SizedBox(width: 8),
+                IconButton(onPressed: _pickEnd, icon: const Icon(Icons.calendar_month)),
+              ]),
+              const SizedBox(height: 12),
+              Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                TextButton(onPressed: ()=>Navigator.of(context).pop(), child: const Text('Cancelar')),
+                const SizedBox(width: 12),
+                FilledButton.icon(
+                  onPressed: (){
+                    if (_end.isBefore(_start)) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('El fin no puede ser anterior al inicio.')));
+                      return;
+                    }
+                    Navigator.of(context).pop(ImportParams(
+                      calendarId: _selected.id ?? '',
+                      calendarName: _selected.name ?? 'Calendario',
+                      start: _start,
+                      end: _end,
+                    ));
+                  },
+                  icon: const Icon(Icons.download),
+                  label: const Text('Importar'),
+                ),
+              ]),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
