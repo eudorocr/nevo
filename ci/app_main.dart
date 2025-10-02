@@ -83,9 +83,9 @@ class CalendarImporter {
   final dc.DeviceCalendarPlugin _plugin = dc.DeviceCalendarPlugin();
 
   Future<bool> _ensurePermissions() async {
-    final res = await _plugin.hasPermissions(); // Result<bool>
+    final res = await _plugin.hasPermissions();
     if (res?.data == true) return true;
-    final req = await _plugin.requestPermissions(); // Result<bool>
+    final req = await _plugin.requestPermissions();
     return req?.data == true;
   }
 
@@ -238,6 +238,53 @@ class _EventListPageState extends State<EventListPage> {
     }
   }
 
+  // ---- búsqueda por fecha cercana ----
+  void _openSearch() async {
+    final params = await showModalBottomSheet<SearchParams>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SearchSheet(initial: SearchParams.near(DateTime.now())),
+    );
+    if (params == null) return;
+
+    final results = _searchAround(params);
+    if (!mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => SearchResultsPage(params: params, results: results),
+    ));
+  }
+
+  List<Event> _searchAround(SearchParams p) {
+    bool containsIgnoreCase(String hay, String needle) =>
+        hay.toLowerCase().contains(needle.toLowerCase());
+
+    final from = DateTime(p.ref.year, p.ref.month, p.ref.day)
+        .subtract(Duration(days: p.rangeDays));
+    final to   = DateTime(p.ref.year, p.ref.month, p.ref.day)
+        .add(Duration(days: p.rangeDays));
+
+    final filtered = _events.where((e) {
+      final inRange = (e.fecha.isAtSameMomentAs(from) || e.fecha.isAfter(from)) &&
+                      (e.fecha.isAtSameMomentAs(to)   || e.fecha.isBefore(to));
+      final okText = (p.query == null || p.query!.trim().isEmpty)
+          ? true
+          : (containsIgnoreCase(e.titulo, p.query!.trim()) ||
+             (e.descripcion != null && containsIgnoreCase(e.descripcion!, p.query!.trim())));
+      return inRange && okText;
+    }).toList();
+
+    filtered.sort((a, b) {
+      final da = (a.fecha.difference(p.ref).inDays).abs();
+      final db = (b.fecha.difference(p.ref).inDays).abs();
+      if (da != db) return da.compareTo(db);
+      return a.fecha.compareTo(b.fecha);
+    });
+    return filtered;
+  }
+
   String _formatDate(DateTime d) {
     const meses = [
       'ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'
@@ -252,6 +299,7 @@ class _EventListPageState extends State<EventListPage> {
         title: const Text('Eventos por fecha'),
         actions: [
           IconButton(onPressed: _importFromCalendar, icon: const Icon(Icons.download)),
+          IconButton(onPressed: _openSearch, icon: const Icon(Icons.search)),
         ],
       ),
       floatingActionButton: FloatingActionButton(
@@ -299,34 +347,44 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-class EventEditorDialog extends StatefulWidget {
-  final Event event;
-  const EventEditorDialog({super.key, required this.event});
+// ======= Búsqueda =======
 
-  @override
-  State<EventEditorDialog> createState() => _EventEditorDialogState();
+class SearchParams {
+  final DateTime ref;
+  final int rangeDays;
+  final String? query;
+  const SearchParams({required this.ref, required this.rangeDays, this.query});
+  factory SearchParams.near(DateTime ref, {int rangeDays = 7, String? query}) =>
+      SearchParams(ref: DateTime(ref.year, ref.month, ref.day), rangeDays: rangeDays, query: query);
 }
 
-class _EventEditorDialogState extends State<EventEditorDialog> {
-  late TextEditingController _title;
-  late TextEditingController _desc;
-  late DateTime _fecha;
+class SearchSheet extends StatefulWidget {
+  final SearchParams initial;
+  const SearchSheet({super.key, required this.initial});
+
+  @override
+  State<SearchSheet> createState() => _SearchSheetState();
+}
+
+class _SearchSheetState extends State<SearchSheet> {
+  late DateTime _ref;
   late TextEditingController _dateCtrl;
+  late TextEditingController _queryCtrl;
+  int _range = 7;
 
   @override
   void initState() {
     super.initState();
-    _title = TextEditingController(text: widget.event.titulo);
-    _desc  = TextEditingController(text: widget.event.descripcion ?? '');
-    _fecha = widget.event.fecha;
-    _dateCtrl = TextEditingController(text: _formatInputDate(_fecha));
+    _ref = widget.initial.ref;
+    _range = widget.initial.rangeDays;
+    _dateCtrl = TextEditingController(text: _formatInputDate(_ref));
+    _queryCtrl = TextEditingController(text: widget.initial.query ?? '');
   }
 
   @override
   void dispose() {
-    _title.dispose();
-    _desc.dispose();
     _dateCtrl.dispose();
+    _queryCtrl.dispose();
     super.dispose();
   }
 
@@ -337,7 +395,7 @@ class _EventEditorDialogState extends State<EventEditorDialog> {
     return '$dd/$mm/$yyyy';
   }
 
-  DateTime? _tryParseInputDate(String s) {
+  DateTime? _parse(String s) {
     final t = s.trim();
     final dmY = RegExp(r'^(\\d{1,2})[/-](\\d{1,2})[/-](\\d{4})$');
     final yMd = RegExp(r'^(\\d{4})[/-](\\d{1,2})[/-](\\d{1,2})$');
@@ -362,10 +420,10 @@ class _EventEditorDialogState extends State<EventEditorDialog> {
     return null;
   }
 
-  Future<void> _pickDate() async {
+  Future<void> _pick() async {
     final picked = await showDatePicker(
       context: context,
-      initialDate: _fecha,
+      initialDate: _ref,
       firstDate: DateTime(1900),
       lastDate:  DateTime(2100),
       helpText: 'Selecciona fecha',
@@ -373,68 +431,28 @@ class _EventEditorDialogState extends State<EventEditorDialog> {
     );
     if (picked != null) {
       setState(() {
-        _fecha = DateTime(picked.year, picked.month, picked.day);
-        _dateCtrl.text = _formatInputDate(_fecha);
+        _ref = DateTime(picked.year, picked.month, picked.day);
+        _dateCtrl.text = _formatInputDate(_ref);
       });
     }
   }
 
-  void _save() {
-    final t = _title.text.trim();
-    if (t.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Escribe un título'))
-      );
-      return;
-    }
-    final parsed = _tryParseInputDate(_dateCtrl.text);
-    final eff = parsed ?? _fecha;
-    final updated = Event(
-      id: widget.event.id,
-      titulo: t,
-      descripcion: _desc.text.trim().isEmpty ? null : _desc.text.trim(),
-      fecha: DateTime(eff.year, eff.month, eff.day),
-    );
-    Navigator.of(context, rootNavigator: true).pop(EventActionResult.saved(updated));
-  }
-
-  void _delete() {
-    Navigator.of(context, rootNavigator: true).pop(EventActionResult.deleted());
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
-        child: SingleChildScrollView(
+    final inset = MediaQuery.of(context).viewInsets.bottom;
+    return Padding(
+      padding: EdgeInsets.only(bottom: inset),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(widget.event.titulo.isEmpty ? 'Nuevo evento' : 'Editar evento',
-                  style: Theme.of(context).textTheme.headlineMedium),
+              Center(child: Container(width: 32, height: 4, decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(3)))),
               const SizedBox(height: 12),
-              TextField(
-                controller: _title,
-                decoration: const InputDecoration(
-                  labelText: 'Título',
-                  prefixIcon: Icon(Icons.title),
-                ),
-                textInputAction: TextInputAction.next,
-              ),
+              Text('Buscar eventos cercanos', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 12),
-              TextField(
-                controller: _desc,
-                minLines: 1,
-                maxLines: 4,
-                decoration: const InputDecoration(
-                  labelText: 'Descripción (opcional)',
-                  prefixIcon: Icon(Icons.notes),
-                ),
-              ),
-              const SizedBox(height: 16),
               Row(
                 children: [
                   Expanded(
@@ -446,46 +464,101 @@ class _EventEditorDialogState extends State<EventEditorDialog> {
                       ),
                       keyboardType: TextInputType.datetime,
                       onSubmitted: (_) {
-                        final p = _tryParseInputDate(_dateCtrl.text);
-                        if (p != null) setState(() => _fecha = p);
+                        final p = _parse(_dateCtrl.text);
+                        if (p != null) setState(() => _ref = p);
                       },
                       onEditingComplete: () {
-                        final p = _tryParseInputDate(_dateCtrl.text);
-                        if (p != null) setState(() => _fecha = p);
+                        final p = _parse(_dateCtrl.text);
+                        if (p != null) setState(() => _ref = p);
                       },
                     ),
                   ),
                   const SizedBox(width: 8),
-                  IconButton(
-                    onPressed: _pickDate,
-                    icon: const Icon(Icons.calendar_month),
-                    tooltip: 'Cambiar',
-                  ),
+                  IconButton(onPressed: _pick, icon: const Icon(Icons.calendar_month)),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  TextButton(onPressed: () => Navigator.of(context, rootNavigator: true).pop(), child: const Text('Cancelar')),
-                  FilledButton.icon(onPressed: _save, icon: const Icon(Icons.save), label: const Text('Guardar')),
+                  const Text('± días:'),
+                  Expanded(
+                    child: Slider(
+                      value: _range.toDouble(),
+                      min: 1,
+                      max: 60,
+                      divisions: 59,
+                      label: '$_range',
+                      onChanged: (v) => setState(() => _range = v.round()),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 56,
+                    child: Text('$_range', textAlign: TextAlign.center),
+                  ),
                 ],
               ),
-              if (widget.event.titulo.isNotEmpty) ...[
-                const Divider(height: 24),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton.icon(
-                    onPressed: _delete,
-                    icon: const Icon(Icons.delete_outline),
-                    label: const Text('Eliminar'),
-                  ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _queryCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Contiene texto (opcional)',
+                  prefixIcon: Icon(Icons.search),
                 ),
-              ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancelar')),
+                  const SizedBox(width: 12),
+                  FilledButton.icon(
+                    onPressed: () {
+                      final p = _parse(_dateCtrl.text);
+                      final eff = p ?? _ref;
+                      Navigator.of(context).pop(SearchParams(ref: eff, rangeDays: _range, query: _queryCtrl.text.trim().isEmpty ? null : _queryCtrl.text.trim()));
+                    },
+                    icon: const Icon(Icons.search),
+                    label: const Text('Buscar'),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class SearchResultsPage extends StatelessWidget {
+  final SearchParams params;
+  final List<Event> results;
+  const SearchResultsPage({super.key, required this.params, required this.results});
+
+  String _formatDate(DateTime d) {
+    const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+    return '${d.day.toString().padLeft(2,'0')} ${meses[d.month-1]} ${d.year}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Resultados')),
+      body: results.isEmpty
+        ? const Center(child: Text('No hay eventos en ese rango.'))
+        : ListView.separated(
+            itemCount: results.length,
+            separatorBuilder: (_, __) => const Divider(height: 1),
+            itemBuilder: (_, i) {
+              final e = results[i];
+              final delta = e.fecha.difference(params.ref).inDays;
+              final sgn = delta == 0 ? 'hoy' : (delta > 0 ? '+$delta días' : '${delta} días');
+              return ListTile(
+                title: Text(e.titulo),
+                subtitle: Text('${_formatDate(e.fecha)}  ·  $sgn'),
+              );
+            },
+          ),
     );
   }
 }
