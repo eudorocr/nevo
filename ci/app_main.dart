@@ -1,3 +1,4 @@
+
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -89,7 +90,7 @@ class CalendarImporter {
     return req?.data == true;
   }
 
-  Future<List<dc.Calendar>> listCalendars({bool writableOnly = true}) async {
+  Future<List<dc.Calendar>> listCalendars({bool writableOnly = false}) async {
     final ok = await _ensurePermissions();
     if (!ok) throw 'Permiso de calendario denegado';
     final cals = (await _plugin.retrieveCalendars()).data?.toList() ?? <dc.Calendar>[];
@@ -180,38 +181,42 @@ class _EventListPageState extends State<EventListPage> {
     try {
       final calendars = await _importer.listCalendars(writableOnly: false);
       if (!mounted) return;
-      final params = await showModalBottomSheet<ImportParams>(
+      final params = await showModalBottomSheet<ImportParamsMulti>(
         context: context,
         isScrollControlled: true,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
-        builder: (ctx) => ImportSheet(calendars: calendars),
+        builder: (ctx) => ImportSheetMulti(calendars: calendars),
       );
       if (params == null) return;
 
-      final imported = await _importer.importEventsForCalendar(
-        calendarId: params.calendarId,
-        start: params.start,
-        end: params.end,
-      );
       int added = 0;
-      for (final ev in imported) {
-        final exists = _events.any((x) =>
-            x.titulo == ev.titulo &&
-            x.fecha.year  == ev.fecha.year &&
-            x.fecha.month == ev.fecha.month &&
-            x.fecha.day   == ev.fecha.day);
-        if (!exists) {
-          _events.add(ev);
-          added++;
+      for (int i = 0; i < params.calendarIds.length; i++) {
+        final cid = params.calendarIds[i];
+        final imported = await _importer.importEventsForCalendar(
+          calendarId: cid,
+          start: params.start,
+          end: params.end,
+        );
+        for (final ev in imported) {
+          final exists = _events.any((x) =>
+              x.titulo == ev.titulo &&
+              x.fecha.year  == ev.fecha.year &&
+              x.fecha.month == ev.fecha.month &&
+              x.fecha.day   == ev.fecha.day);
+          if (!exists) {
+            _events.add(ev);
+            added++;
+          }
         }
       }
       _events.sort((a, b) => a.fecha.compareTo(b.fecha));
       await _persist();
       if (!mounted) return;
+      final cCount = params.calendarIds.length;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Importados $added evento(s) de "${params.calendarName}"'))
+        SnackBar(content: Text('Importados $added evento(s) de $cCount calendario(s)'))
       );
     } catch (e) {
       if (!mounted) return;
@@ -415,8 +420,8 @@ class _SearchSheetState extends State<SearchSheet> {
 
   DateTime? _parse(String s) {
     final t = s.trim();
-    final dmY = RegExp(r'^(\\d{1,2})[/-](\\d{1,2})[/-](\\d{4})$');
-    final yMd = RegExp(r'^(\\d{4})[/-](\\d{1,2})[/-](\\d{1,2})$');
+    final dmY = RegExp(r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$');
+    final yMd = RegExp(r'^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$');
     final a = dmY.firstMatch(t);
     if (a != null) {
       final d = int.tryParse(a.group(1)!);
@@ -581,26 +586,25 @@ class SearchResultsPage extends StatelessWidget {
   }
 }
 
-// ======= Importación con selección =======
+// ======= Importación con selección múltiple =======
 
-class ImportParams {
-  final String calendarId;
-  final String calendarName;
+class ImportParamsMulti {
+  final List<String> calendarIds;
   final DateTime start;
   final DateTime end;
-  const ImportParams({required this.calendarId, required this.calendarName, required this.start, required this.end});
+  const ImportParamsMulti({required this.calendarIds, required this.start, required this.end});
 }
 
-class ImportSheet extends StatefulWidget {
+class ImportSheetMulti extends StatefulWidget {
   final List<dc.Calendar> calendars;
-  const ImportSheet({super.key, required this.calendars});
+  const ImportSheetMulti({super.key, required this.calendars});
 
   @override
-  State<ImportSheet> createState() => _ImportSheetState();
+  State<ImportSheetMulti> createState() => _ImportSheetMultiState();
 }
 
-class _ImportSheetState extends State<ImportSheet> {
-  late dc.Calendar _selected;
+class _ImportSheetMultiState extends State<ImportSheetMulti> {
+  late Map<String, bool> _selected;
   late DateTime _start;
   late DateTime _end;
   late TextEditingController _startCtrl;
@@ -609,7 +613,14 @@ class _ImportSheetState extends State<ImportSheet> {
   @override
   void initState() {
     super.initState();
-    _selected = widget.calendars.first;
+    _selected = {
+      for (final c in widget.calendars)
+        (c.id ?? ''): (c.isReadOnly ?? false) ? false : true
+    };
+    if (_selected.values.every((v) => v == false) && _selected.isNotEmpty) {
+      // si todos quedaron en false, selecciona el primero
+      _selected[_selected.keys.first] = true;
+    }
     final now = DateTime.now();
     _start = DateTime(now.year, now.month, now.day).subtract(const Duration(days: 30));
     _end   = DateTime(now.year, now.month, now.day).add(const Duration(days: 90));
@@ -633,8 +644,8 @@ class _ImportSheetState extends State<ImportSheet> {
 
   DateTime? _parse(String s) {
     final t = s.trim();
-    final dmY = RegExp(r'^(\\d{1,2})[/-](\\d{1,2})[/-](\\d{4})$');
-    final yMd = RegExp(r'^(\\d{4})[/-](\\d{1,2})[/-](\\d{1,2})$');
+    final dmY = RegExp(r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$');
+    final yMd = RegExp(r'^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$');
     final a = dmY.firstMatch(t);
     if (a != null) {
       final d = int.tryParse(a.group(1)!);
@@ -694,6 +705,8 @@ class _ImportSheetState extends State<ImportSheet> {
   @override
   Widget build(BuildContext context) {
     final inset = MediaQuery.of(context).viewInsets.bottom;
+    final ids = _selected.entries.where((e) => e.value).map((e) => e.key).toList();
+    final countSel = ids.length;
     return Padding(
       padding: EdgeInsets.only(bottom: inset),
       child: SafeArea(
@@ -705,18 +718,43 @@ class _ImportSheetState extends State<ImportSheet> {
             children: [
               Center(child: Container(width: 32, height: 4, decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(3)))),
               const SizedBox(height: 12),
-              Text('Importar del calendario', style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<dc.Calendar>(
-                value: _selected,
-                items: widget.calendars.map((c) => DropdownMenuItem<dc.Calendar>(
-                  value: c,
-                  child: Text((c.name ?? 'Sin nombre') + ((c.isReadOnly ?? false) ? ' (sólo lectura)' : '')),
-                )).toList(),
-                onChanged: (v) => setState(() { if (v != null) _selected = v; }),
-                decoration: const InputDecoration(
-                  labelText: 'Calendario',
-                  prefixIcon: Icon(Icons.calendar_today),
+              Text('Importar de calendarios', style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(child: Text('Selecciona uno o varios ($countSel)')),
+                  TextButton.icon(
+                    onPressed: (){
+                      final allSelected = _selected.values.every((v)=>v);
+                      setState((){
+                        for (final k in _selected.keys) { _selected[k] = !allSelected; }
+                      });
+                    },
+                    icon: const Icon(Icons.select_all),
+                    label: const Text('Todos/Ninguno'),
+                  )
+                ],
+              ),
+              const SizedBox(height: 8),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 240),
+                child: Scrollbar(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: widget.calendars.length,
+                    itemBuilder: (_, i){
+                      final c = widget.calendars[i];
+                      final id = c.id ?? '';
+                      final name = (c.name ?? 'Sin nombre');
+                      final ro = (c.isReadOnly ?? false) ? ' · sólo lectura' : '';
+                      return CheckboxListTile(
+                        value: _selected[id] ?? false,
+                        onChanged: (v){ setState(()=> _selected[id] = v ?? false); },
+                        title: Text(name),
+                        subtitle: Text('ID: $id$ro', maxLines: 1, overflow: TextOverflow.ellipsis),
+                      );
+                    },
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
@@ -749,13 +787,17 @@ class _ImportSheetState extends State<ImportSheet> {
                 const SizedBox(width: 12),
                 FilledButton.icon(
                   onPressed: (){
+                    final ids = _selected.entries.where((e)=>e.value).map((e)=>e.key).where((k)=>k.isNotEmpty).toList();
+                    if (ids.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecciona al menos un calendario.')));
+                      return;
+                    }
                     if (_end.isBefore(_start)) {
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('El fin no puede ser anterior al inicio.')));
                       return;
                     }
-                    Navigator.of(context).pop(ImportParams(
-                      calendarId: _selected.id ?? '',
-                      calendarName: _selected.name ?? 'Calendario',
+                    Navigator.of(context).pop(ImportParamsMulti(
+                      calendarIds: ids,
                       start: _start,
                       end: _end,
                     ));
