@@ -127,7 +127,8 @@ class CalendarImporter {
       final descr = (e.description?.trim().isEmpty ?? true)
           ? null
           : e.description!.trim();
-      final id = 'ext:${cal.id}:${e.eventId ?? e.originalStart?.millisecondsSinceEpoch}:${d.toIso8601String()}';
+      final unique = e.eventId ?? dt.millisecondsSinceEpoch.toString();
+      final id = 'ext:${cal.id}:$unique:${d.toIso8601String()}';
       out.add(Event(id: id, titulo: title, descripcion: descr, fecha: d));
       if (out.length >= maxEvents) break;
     }
