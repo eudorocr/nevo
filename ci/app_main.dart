@@ -192,8 +192,7 @@ class _EventListPageState extends State<EventListPage> {
       if (params == null) return;
 
       int added = 0;
-      for (int i = 0; i < params.calendarIds.length; i++) {
-        final cid = params.calendarIds[i];
+      for (final cid in params.calendarIds) {
         final imported = await _importer.importEventsForCalendar(
           calendarId: cid,
           start: params.start,
@@ -618,7 +617,6 @@ class _ImportSheetMultiState extends State<ImportSheetMulti> {
         (c.id ?? ''): (c.isReadOnly ?? false) ? false : true
     };
     if (_selected.values.every((v) => v == false) && _selected.isNotEmpty) {
-      // si todos quedaron en false, selecciona el primero
       _selected[_selected.keys.first] = true;
     }
     final now = DateTime.now();
@@ -806,6 +804,199 @@ class _ImportSheetMultiState extends State<ImportSheetMulti> {
                   label: const Text('Importar'),
                 ),
               ]),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ======= Editor de eventos =======
+
+class EventEditorDialog extends StatefulWidget {
+  final Event event;
+  const EventEditorDialog({super.key, required this.event});
+
+  @override
+  State<EventEditorDialog> createState() => _EventEditorDialogState();
+}
+
+class _EventEditorDialogState extends State<EventEditorDialog> {
+  late TextEditingController _title;
+  late TextEditingController _desc;
+  late DateTime _fecha;
+  late TextEditingController _dateCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _title = TextEditingController(text: widget.event.titulo);
+    _desc  = TextEditingController(text: widget.event.descripcion ?? '');
+    _fecha = widget.event.fecha;
+    _dateCtrl = TextEditingController(text: _formatInputDate(_fecha));
+  }
+
+  @override
+  void dispose() {
+    _title.dispose();
+    _desc.dispose();
+    _dateCtrl.dispose();
+    super.dispose();
+  }
+
+  String _formatInputDate(DateTime d) {
+    final dd = d.day.toString().padLeft(2, '0');
+    final mm = d.month.toString().padLeft(2, '0');
+    final yyyy = d.year.toString();
+    return '$dd/$mm/$yyyy';
+  }
+
+  DateTime? _tryParseInputDate(String s) {
+    final t = s.trim();
+    final dmY = RegExp(r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$');
+    final yMd = RegExp(r'^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$');
+    final a = dmY.firstMatch(t);
+    if (a != null) {
+      final d = int.tryParse(a.group(1)!);
+      final m = int.tryParse(a.group(2)!);
+      final y = int.tryParse(a.group(3)!);
+      if (d != null && m != null && y != null) {
+        try { return DateTime(y, m, d); } catch (_) {}
+      }
+    }
+    final b = yMd.firstMatch(t);
+    if (b != null) {
+      final y = int.tryParse(b.group(1)!);
+      final m = int.tryParse(b.group(2)!);
+      final d = int.tryParse(b.group(3)!);
+      if (d != null && m != null && y != null) {
+        try { return DateTime(y, m, d); } catch (_) {}
+      }
+    }
+    return null;
+  }
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _fecha,
+      firstDate: DateTime(1900),
+      lastDate:  DateTime(2100),
+      helpText: 'Selecciona fecha',
+      useRootNavigator: true,
+    );
+    if (picked != null) {
+      setState(() {
+        _fecha = DateTime(picked.year, picked.month, picked.day);
+        _dateCtrl.text = _formatInputDate(_fecha);
+      });
+    }
+  }
+
+  void _save() {
+    final t = _title.text.trim();
+    if (t.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Escribe un título'))
+      );
+      return;
+    }
+    final parsed = _tryParseInputDate(_dateCtrl.text);
+    final eff = parsed ?? _fecha;
+    final updated = Event(
+      id: widget.event.id,
+      titulo: t,
+      descripcion: _desc.text.trim().isEmpty ? null : _desc.text.trim(),
+      fecha: DateTime(eff.year, eff.month, eff.day),
+    );
+    Navigator.of(context, rootNavigator: true).pop(EventActionResult.saved(updated));
+  }
+
+  void _delete() {
+    Navigator.of(context, rootNavigator: true).pop(EventActionResult.deleted());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(widget.event.titulo.isEmpty ? 'Nuevo evento' : 'Editar evento',
+                  style: Theme.of(context).textTheme.headlineMedium),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _title,
+                decoration: const InputDecoration(
+                  labelText: 'Título',
+                  prefixIcon: Icon(Icons.title),
+                ),
+                textInputAction: TextInputAction.next,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _desc,
+                minLines: 1,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Descripción (opcional)',
+                  prefixIcon: Icon(Icons.notes),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _dateCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Fecha (dd/mm/aaaa o yyyy-mm-dd)',
+                        prefixIcon: Icon(Icons.event),
+                      ),
+                      keyboardType: TextInputType.datetime,
+                      onSubmitted: (_) {
+                        final p = _tryParseInputDate(_dateCtrl.text);
+                        if (p != null) setState(() => _fecha = p);
+                      },
+                      onEditingComplete: () {
+                        final p = _tryParseInputDate(_dateCtrl.text);
+                        if (p != null) setState(() => _fecha = p);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    onPressed: _pickDate,
+                    icon: const Icon(Icons.calendar_month),
+                    tooltip: 'Cambiar',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  TextButton(onPressed: () => Navigator.of(context, rootNavigator: true).pop(), child: const Text('Cancelar')),
+                  FilledButton.icon(onPressed: _save, icon: const Icon(Icons.save), label: const Text('Guardar')),
+                ],
+              ),
+              if (widget.event.titulo.isNotEmpty) ...[
+                const Divider(height: 24),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: _delete,
+                    icon: const Icon(Icons.delete_outline),
+                    label: const Text('Eliminar'),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
