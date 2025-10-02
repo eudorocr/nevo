@@ -65,8 +65,8 @@ jobs:
               awk '{
                 print $0
                 if ($0 ~ /<manifest[^>]*>/ && !inserted) {
-                  print "    <uses-permission android=\"name\" android:name=\"android.permission.READ_CALENDAR\" />"
-                  print "    <uses-permission android=\"name\" android:name=\"android.permission.WRITE_CALENDAR\" />"
+                  print "    <uses-permission android:name=\"android.permission.READ_CALENDAR\" />"
+                  print "    <uses-permission android:name=\"android.permission.WRITE_CALENDAR\" />"
                   inserted=1
                 }
               }' "$FILE" > tmp && mv tmp "$FILE"
@@ -117,5 +117,4 @@ jobs:
             app/build/app/outputs/flutter-apk/app-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
 
